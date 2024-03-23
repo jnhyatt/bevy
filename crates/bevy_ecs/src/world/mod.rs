@@ -9,6 +9,7 @@ pub mod unsafe_world_cell;
 
 pub use crate::change_detection::{Mut, Ref, CHECK_TICK_THRESHOLD};
 pub use crate::world::command_queue::CommandQueue;
+use bevy_utils::HashMap;
 pub use deferred_world::DeferredWorld;
 pub use entity_ref::{
     EntityMut, EntityRef, EntityWorldMut, Entry, FilteredEntityMut, FilteredEntityRef,
@@ -35,6 +36,7 @@ use crate::{
 };
 use bevy_ptr::{OwningPtr, Ptr};
 use bevy_utils::tracing::warn;
+use std::alloc::Layout;
 use std::{
     any::TypeId,
     fmt,
@@ -113,6 +115,8 @@ pub struct World {
     pub(crate) last_change_tick: Tick,
     pub(crate) last_check_tick: Tick,
     pub(crate) command_queue: CommandQueue,
+    /// Maps dynamic components created from a template to the type id of the template it's based on
+    component_templates: HashMap<ComponentId, TypeId>,
 }
 
 impl Default for World {
@@ -131,6 +135,7 @@ impl Default for World {
             last_change_tick: Tick::new(0),
             last_check_tick: Tick::new(0),
             command_queue: CommandQueue::default(),
+            component_templates: HashMap::default(),
         }
     }
 }
@@ -260,6 +265,33 @@ impl World {
     ) -> ComponentId {
         self.components
             .init_component_with_descriptor(&mut self.storages, descriptor)
+    }
+
+    pub fn dynamic_component<T: Component>(&mut self) -> ComponentId {
+        unsafe fn drop<T>(this: OwningPtr) {
+            // SAFETY: this component will have been created with an instance of `T`
+            unsafe {
+                this.drop_as::<T>();
+            }
+        }
+
+        // SAFETY:
+        // - `drop` drops values as `T`
+        // - `T` is a `Component` which is `Send + Sync`
+        let descriptor = unsafe {
+            ComponentDescriptor::new_with_layout(
+                std::any::type_name::<T>(),
+                T::STORAGE_TYPE,
+                Layout::new::<T>(),
+                Some(drop::<T>),
+            )
+        };
+        let id = self.init_component_with_descriptor(descriptor);
+
+        // SAFETY (not unsafe): this is a brand new id, it can't be in the map yet
+        self.component_templates
+            .insert_unique_unchecked(id, TypeId::of::<T>());
+        id
     }
 
     /// Returns the [`ComponentId`] of the given [`Component`] type `T`.

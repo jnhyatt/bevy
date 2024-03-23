@@ -10,7 +10,7 @@ use crate::{
     world::{Mut, World},
 };
 use bevy_ptr::{OwningPtr, Ptr};
-use std::{any::TypeId, marker::PhantomData};
+use std::{any::TypeId, marker::PhantomData, mem, ptr::NonNull};
 use thiserror::Error;
 
 use super::{unsafe_world_cell::UnsafeEntityCell, Ref};
@@ -805,6 +805,41 @@ impl<'w> EntityWorldMut<'w> {
             Some(storage_type).iter().cloned(),
         );
         self
+    }
+
+    pub fn insert_dynamic<T: Component>(
+        &mut self,
+        component_id: ComponentId,
+        mut data: T,
+    ) -> &mut Self {
+        assert_eq!(
+            *self
+                .world
+                .component_templates
+                .get(&component_id)
+                .expect("Attempting to insert component that came from another World!"),
+            TypeId::of::<T>()
+        );
+
+        let data_ptr = (&mut data as *mut T).cast::<u8>();
+
+        // SAFETY: `data_ptr` is the address of `data` so can't be null
+        let data_ptr = unsafe { NonNull::new_unchecked(data_ptr) };
+
+        // SAFETY:
+        // - `data_ptr` points to a valid `T`
+        // - `data_ptr` is properly aligned since it came from a `&mut T`
+        // - we have exclusive access to `data` and never borrow it again
+        // - `data` lives until `insert_by_id` is done with it
+        let data_ptr = unsafe { OwningPtr::new(data_ptr) };
+
+        // Forget `data` so the ECS can take ownership of it
+        mem::forget(data);
+
+        // SAFETY:
+        // - above assertion guarantees `component_id` is from this [`World`]
+        // - `data_ptr` will be valid for the rest of the function
+        unsafe { self.insert_by_id(component_id, data_ptr) }
     }
 
     /// Inserts a dynamic [`Bundle`] into the entity.
