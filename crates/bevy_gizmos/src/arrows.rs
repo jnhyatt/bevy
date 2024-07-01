@@ -8,12 +8,16 @@ use bevy_color::{
     palettes::basic::{BLUE, GREEN, RED},
     Color,
 };
-use bevy_math::{Quat, Vec2, Vec3};
+use bevy_math::{Quat, Vec2, Vec3, Vec3Swizzles};
 use bevy_transform::TransformPoint;
 
 /// A builder returned by [`Gizmos::arrow`] and [`Gizmos::arrow_2d`]
-pub struct ArrowBuilder<'a, 'w, 's, T: GizmoConfigGroup> {
-    gizmos: &'a mut Gizmos<'w, 's, T>,
+pub struct ArrowBuilder<'a, 'w, 's, Config, Clear>
+where
+    Config: GizmoConfigGroup,
+    Clear: 'static + Send + Sync,
+{
+    gizmos: &'a mut Gizmos<'w, 's, Config, Clear>,
     start: Vec3,
     end: Vec3,
     color: Color,
@@ -21,7 +25,11 @@ pub struct ArrowBuilder<'a, 'w, 's, T: GizmoConfigGroup> {
     tip_length: f32,
 }
 
-impl<T: GizmoConfigGroup> ArrowBuilder<'_, '_, '_, T> {
+impl<Config, Clear> ArrowBuilder<'_, '_, '_, Config, Clear>
+where
+    Config: GizmoConfigGroup,
+    Clear: 'static + Send + Sync,
+{
     /// Change the length of the tips to be `length`.
     /// The default tip length is [length of the arrow]/10.
     ///
@@ -51,7 +59,11 @@ impl<T: GizmoConfigGroup> ArrowBuilder<'_, '_, '_, T> {
     }
 }
 
-impl<T: GizmoConfigGroup> Drop for ArrowBuilder<'_, '_, '_, T> {
+impl<Config, Clear> Drop for ArrowBuilder<'_, '_, '_, Config, Clear>
+where
+    Config: GizmoConfigGroup,
+    Clear: 'static + Send + Sync,
+{
     /// Draws the arrow, by drawing lines with the stored [`Gizmos`]
     fn drop(&mut self) {
         if !self.gizmos.enabled {
@@ -90,7 +102,11 @@ impl<T: GizmoConfigGroup> Drop for ArrowBuilder<'_, '_, '_, T> {
     }
 }
 
-impl<'w, 's, T: GizmoConfigGroup> Gizmos<'w, 's, T> {
+impl<'w, 's, Config, Clear> Gizmos<'w, 's, Config, Clear>
+where
+    Config: GizmoConfigGroup,
+    Clear: 'static + Send + Sync,
+{
     /// Draw an arrow in 3D, from `start` to `end`. Has four tips for convenient viewing from any direction.
     ///
     /// This should be called for each frame the arrow needs to be rendered.
@@ -111,7 +127,7 @@ impl<'w, 's, T: GizmoConfigGroup> Gizmos<'w, 's, T> {
         start: Vec3,
         end: Vec3,
         color: impl Into<Color>,
-    ) -> ArrowBuilder<'_, 'w, 's, T> {
+    ) -> ArrowBuilder<'_, 'w, 's, Config, Clear> {
         let length = (end - start).length();
         ArrowBuilder {
             gizmos: self,
@@ -143,12 +159,16 @@ impl<'w, 's, T: GizmoConfigGroup> Gizmos<'w, 's, T> {
         start: Vec2,
         end: Vec2,
         color: impl Into<Color>,
-    ) -> ArrowBuilder<'_, 'w, 's, T> {
+    ) -> ArrowBuilder<'_, 'w, 's, Config, Clear> {
         self.arrow(start.extend(0.), end.extend(0.), color)
     }
 }
 
-impl<'w, 's, T: GizmoConfigGroup> Gizmos<'w, 's, T> {
+impl<'w, 's, Config, Clear> Gizmos<'w, 's, Config, Clear>
+where
+    Config: GizmoConfigGroup,
+    Clear: 'static + Send + Sync,
+{
     /// Draw a set of axes local to the given transform (`transform`), with length scaled by a factor
     /// of `base_length`.
     ///
@@ -180,5 +200,36 @@ impl<'w, 's, T: GizmoConfigGroup> Gizmos<'w, 's, T> {
         self.arrow(start, end_x, RED);
         self.arrow(start, end_y, GREEN);
         self.arrow(start, end_z, BLUE);
+    }
+
+    /// Draw a set of axes local to the given transform (`transform`), with length scaled by a factor
+    /// of `base_length`.
+    ///
+    /// This should be called for each frame the axes need to be rendered.
+    ///
+    /// # Example
+    /// ```
+    /// # use bevy_gizmos::prelude::*;
+    /// # use bevy_ecs::prelude::*;
+    /// # use bevy_transform::components::Transform;
+    /// # #[derive(Component)]
+    /// # struct AxesComponent;
+    /// fn draw_axes_2d(
+    ///     mut gizmos: Gizmos,
+    ///     query: Query<&Transform, With<AxesComponent>>,
+    /// ) {
+    ///     for &transform in &query {
+    ///         gizmos.axes_2d(transform, 1.);
+    ///     }
+    /// }
+    /// # bevy_ecs::system::assert_is_system(draw_axes_2d);
+    /// ```
+    pub fn axes_2d(&mut self, transform: impl TransformPoint, base_length: f32) {
+        let start = transform.transform_point(Vec3::ZERO);
+        let end_x = transform.transform_point(base_length * Vec3::X);
+        let end_y = transform.transform_point(base_length * Vec3::Y);
+
+        self.arrow_2d(start.xy(), end_x.xy(), RED);
+        self.arrow_2d(start.xy(), end_y.xy(), GREEN);
     }
 }
